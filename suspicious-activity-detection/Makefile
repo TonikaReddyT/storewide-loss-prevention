@@ -34,10 +34,8 @@ demo:
 	$(COMPOSE_ALL) up -d
 	@echo ""
 	@echo "=== Waiting for VDMS + scene controller to settle ==="
-	@sleep 15
-	@$(MAKE) fix-reid
-	@rm -f application.log
-	@$(COMPOSE_ALL) logs -f swlp-service behavioral-analysis alert-service > application.log 2>&1 &
+	
+	
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
