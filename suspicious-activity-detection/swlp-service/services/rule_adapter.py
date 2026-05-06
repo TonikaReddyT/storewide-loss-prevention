@@ -615,7 +615,7 @@ class RuleEngineAdapter:
         finally:
             session._pending_ba_result = None
 
-        log_end_time("SWLP-Service","suspcious-activity")
+        log_end_time("USECASE_1","suspcious-activity")
         # BA-specific evidence handling: for each alert that fired in
         # response to this BA result, copy the visit's frames (up to
         # last_frame_ts) into the per-alert prefix and mark the visit as
