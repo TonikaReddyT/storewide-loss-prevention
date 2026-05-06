@@ -40,6 +40,7 @@ from backend.observer.events import EventBus, MatchFoundEvent
 from backend.service.alert_service import AlertService
 from backend.service.event_service import EventService
 from backend.service.matching_service import MatchingService
+from backend.utils.face_processing import MIN_FACE_SIZE, embedding_norm, is_face_usable
 from backend.utils.thumbnail import submit_capture
 
 log = logging.getLogger("poi.consumer")
@@ -176,26 +177,38 @@ class EventConsumer:
 
             for face in obj.get("sub_objects", {}).get("face", []):
                 face_conf = face.get("confidence", 0.0)
-                if face_conf < FACE_CONFIDENCE_THRESHOLD:
+                face_bbox = face.get("bounding_box_px")
+
+                # Compute face dimensions for quality check
+                face_w = face_bbox.get("width", 0) if isinstance(face_bbox, dict) else 0
+                face_h = face_bbox.get("height", 0) if isinstance(face_bbox, dict) else 0
+
+                if not is_face_usable(face_w, face_h, face_conf):
                     log.debug(
-                        "Skipping low-confidence face: camera=%s person=%s conf=%.3f",
-                        camera_id, person_int_id, face_conf,
+                        "Skipping unusable face: camera=%s person=%s conf=%.3f size=%dx%d",
+                        camera_id, person_int_id, face_conf, face_w, face_h,
                     )
                     continue
+
                 raw = face.get("metadata", {}).get("reid", {}).get("embedding_vector", "")
                 vec = _parse_embedding(raw)
                 if vec and face_conf > best_face_conf:
                     embedding_vector = vec
                     best_face_conf = face_conf
-                    best_face_bbox = face.get("bounding_box_px")
+                    best_face_bbox = face_bbox
 
             if not embedding_vector:
                 log.debug("No face embedding for camera=%s person=%s — skipping FAISS", camera_id, person_int_id)
                 continue
 
+            # Log embedding norm — should be ~1.0 for properly L2-normalised vectors
+            import numpy as _np
+            _vec_arr = _np.array(embedding_vector, dtype=_np.float32)
+            _norm = embedding_norm(_vec_arr)
+
             log.info(
-                "Face embedding found: camera=%s person=%s conf=%.3f dim=%d",
-                camera_id, person_int_id, best_face_conf, len(embedding_vector),
+                "Face embedding found: camera=%s person=%s conf=%.3f dim=%d norm=%.6f",
+                camera_id, person_int_id, best_face_conf, len(embedding_vector), _norm,
             )
 
             # Use a stable camera-local track key for dedup.
@@ -335,10 +348,13 @@ class EventConsumer:
             self._event_repo.set_match_metadata(object_id, match_meta, ttl=3600)
             log.debug("Match metadata written to Redis for uuid=%s", object_id)
 
-        # Capture thumbnail from RTSP — only when we have a valid camera_id
+        # Capture thumbnail using the timestamp-matched frame from the ring buffer.
+        # The MQTT image subscriber continuously polls getimage, caching frames
+        # keyed by timestamp.  submit_capture looks up the exact frame matching
+        # this detection's timestamp — no SceneScape code changes required.
         thumbnail_path = ""
         if camera_id and self._event_repo and self._event_repo.claim_thumbnail(object_id, ttl=30):
-            future = submit_capture(camera_id, bounding_box)
+            future = submit_capture(camera_id, bounding_box, timestamp)
             try:
                 b64 = future.result(timeout=6)
                 if b64:

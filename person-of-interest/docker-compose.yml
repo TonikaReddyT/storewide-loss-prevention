@@ -19,11 +19,14 @@ services:
       - RTSP_BASE_URL=rtsp://mediaserver:8554
       - RTSP_PREWARM_CAMERAS=Camera_01,Camera_02
       - MQTT_IMAGE_CAMERAS=Camera_01,Camera_02
-      - SIMILARITY_THRESHOLD=0.68
+      - SIMILARITY_THRESHOLD=0.60
       - OBJECT_CACHE_TTL=5
+      - ENROLL_FACE_PADDING=0.0
+      - ENROLL_FACE_SQUARE=false
+      - ENROLL_EMBEDDING_STRATEGY=mean
     volumes:
       - faiss-data:/data/faiss
-      - upload-data:/data/uploads
+      - ./data/uploads:/data/uploads
       - ./models/intel/intel:/models/intel:ro
     depends_on:
       redis:
@@ -132,7 +135,6 @@ services:
 volumes:
   redis-data:
   faiss-data:
-  upload-data:
 
 networks:
   poi-net:
