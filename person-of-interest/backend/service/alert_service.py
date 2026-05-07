@@ -13,6 +13,11 @@ from backend.domain.interfaces.alert import AlertStrategy
 from backend.domain.interfaces.repository import EventRepository, POIRepository
 from backend.observer.events import EventBus, MatchFoundEvent
 
+try:
+    from vlm_metrics_logger import log_end_time
+except ImportError:
+    log_end_time = None
+
 log = logging.getLogger("poi.service.alert")
 
 
@@ -63,6 +68,12 @@ class AlertService:
         if all_delivered:
             self._event_repo.store_alert(event.alert.to_dict())
             self._event_repo.mark_alert_sent(dedup_key, ttl=self._cfg.alert_dedup_ttl)
+            # Log end time for performance metrics
+            if log_end_time:
+                try:
+                    log_end_time("USECASE_1", "person-of-interest")
+                except Exception:
+                    log.debug("Failed to log end time for alert=%s", event.alert.alert_id)
 
     def create_alert_payload(
         self,

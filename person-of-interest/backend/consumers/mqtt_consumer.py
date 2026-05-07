@@ -43,6 +43,11 @@ from backend.service.matching_service import MatchingService
 from backend.utils.face_processing import MIN_FACE_SIZE, embedding_norm, is_face_usable
 from backend.utils.thumbnail import grab_frame_now, submit_capture
 
+try:
+    from vlm_metrics_logger import user_log_start_time
+except ImportError:
+    user_log_start_time = None
+
 log = logging.getLogger("poi.consumer")
 
 # Primary: camera topic — face embeddings from face-reidentification-retail-0095
@@ -153,6 +158,17 @@ class EventConsumer:
 
         camera_id = m.group("camera_id")
         timestamp = payload.get("timestamp", "")
+
+        # Log detection start time for performance metrics
+        if user_log_start_time and timestamp:
+            try:
+                from datetime import datetime as _dt
+                ts_ms = int(
+                    _dt.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp() * 1000
+                )
+                user_log_start_time(ts_ms, "USECASE_1", "person-of-interest")
+            except Exception:
+                log.debug("Failed to log start time for ts=%s", timestamp)
 
         objects = payload.get("objects", {})
         if isinstance(objects, dict):
