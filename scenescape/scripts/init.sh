@@ -107,6 +107,17 @@ print(f'LOG_LEVEL=\"{svc.get(\"log_level\", \"INFO\")}\"')
 print(f'SEAWEEDFS_S3_PORT=\"{svc.get(\"seaweedfs_s3_port\", 8333)}\"')
 print(f'SEAWEEDFS_MASTER_PORT=\"{svc.get(\"seaweedfs_master_port\", 9333)}\"')
 print(f'SEAWEEDFS_VOLUME_PORT=\"{svc.get(\"seaweedfs_volume_port\", 8080)}\"')
+
+# Benchmark
+bm = cfg.get('benchmark', {})
+print(f'BENCHMARK_TARGET_LATENCY_MS=\"{bm.get(\"target_latency_ms\", 2000)}\"')
+print(f'BENCHMARK_LATENCY_METRIC=\"{bm.get(\"latency_metric\", \"avg\")}\"')
+print(f'BENCHMARK_SCENE_INCREMENT=\"{bm.get(\"scene_increment\", 1)}\"')
+print(f'BENCHMARK_INIT_DURATION=\"{bm.get(\"init_duration\", 90)}\"')
+print(f'BENCHMARK_STABILISE_DURATION=\"{bm.get(\"stabilise_duration\", 30)}\"')
+print(f'BENCHMARK_MAX_ITERATIONS=\"{bm.get(\"max_iterations\", 50)}\"')
+print(f'BENCHMARK_MIN_THROUGHPUT_RATIO=\"{bm.get(\"min_throughput_ratio\", 0.5)}\"')
+print(f'RESULTS_PATH=\"{bm.get(\"results_path\", \"./results\")}\"')
 " 2>/dev/null)"
 
 # Apply defaults for required fields
@@ -279,6 +290,16 @@ SEAWEEDFS_VOLUME_PORT=${SEAWEEDFS_VOLUME_PORT}
 # ---- SceneScape API (from zone_config.json) ----
 SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
+
+# ---- Benchmark (from zone_config.json) ----
+BENCHMARK_TARGET_LATENCY_MS=${BENCHMARK_TARGET_LATENCY_MS}
+BENCHMARK_LATENCY_METRIC=${BENCHMARK_LATENCY_METRIC}
+BENCHMARK_SCENE_INCREMENT=${BENCHMARK_SCENE_INCREMENT}
+BENCHMARK_INIT_DURATION=${BENCHMARK_INIT_DURATION}
+BENCHMARK_STABILISE_DURATION=${BENCHMARK_STABILISE_DURATION}
+BENCHMARK_MAX_ITERATIONS=${BENCHMARK_MAX_ITERATIONS}
+BENCHMARK_MIN_THROUGHPUT_RATIO=${BENCHMARK_MIN_THROUGHPUT_RATIO}
+RESULTS_PATH=${RESULTS_PATH}
 EOF
 
 echo ""

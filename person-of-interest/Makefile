@@ -11,6 +11,11 @@ SCENESCAPE_DIR := ../scenescape
 COMPOSE_SCENESCAPE := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml
 COMPOSE_LP := docker compose --project-directory . --env-file docker/.env -f docker/docker-compose.yaml
 COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(SCENESCAPE_DIR)/docker-compose.yaml -f docker/docker-compose.yaml
+# When stream-density override exists, layer it in
+CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
+COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
+
+RESULTS_PATH ?= ./results
 
 # ---- Initialization ----
 
@@ -23,20 +28,23 @@ init:
 .PHONY: demo
 demo:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
+	@mkdir -p $(RESULTS_PATH)
 	@echo ""
 	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
 	@rm -f application.log
-	@$(COMPOSE_ALL) logs -f storewide-loss-prevention > application.log 2>&1 &
+	@$(COMPOSE_ALL) logs -f swlp-service behavioral-analysis alert-service > application.log 2>&1 &
 	@echo ""
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
 	@echo "  Gradio UI:       http://localhost:7860"
 	@echo "  LP API:          http://localhost:8082"
+	@echo "  Alert Service:   http://localhost:8000"
+	@echo "  Alert WS:        ws://localhost:8000/api/v1/ws"
 	@echo "  LP logs:         application.log"
 	@echo ""
 	@echo "To stop: make lp-down"
@@ -44,6 +52,7 @@ demo:
 .PHONY: lp-down
 lp-down:
 	-$(COMPOSE_ALL) down
+	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
 	@rm -f application.log
 
 # SceneScape only (without LP services)
@@ -72,13 +81,128 @@ status:
 .PHONY: demo-lp
 demo-lp:
 	@echo "Building LP images..."
-	$(COMPOSE_ALL) build storewide-loss-prevention gradio-ui
+	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
 	@echo "Starting LP services only (SceneScape must be running)..."
 	$(COMPOSE_LP) up -d
 
 .PHONY: down-lp
 down-lp:
 	$(COMPOSE_LP) down
+
+# ---- Models ----
+
+.PHONY: download-models
+download-models:
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) download-models
+
+# ---- Stream Density & Benchmarking ----
+
+PERF_TOOLS_DIR := ../performance-tools/benchmark-scripts
+SAD_STREAM_DENSITY := $(PERF_TOOLS_DIR)/sad_stream_density.py
+
+# Benchmark configuration (override via env or docker/.env)
+BENCHMARK_TARGET_LATENCY_MS ?= 2000
+BENCHMARK_LATENCY_METRIC ?= avg
+BENCHMARK_SCENE_INCREMENT ?= 1
+BENCHMARK_INIT_DURATION ?= 90
+BENCHMARK_STABILISE_DURATION ?= 30
+BENCHMARK_MAX_ITERATIONS ?= 50
+BENCHMARK_MIN_THROUGHPUT_RATIO ?= 0.5
+
+# Short-name aliases
+ifdef TARGET_LATENCY_MS
+BENCHMARK_TARGET_LATENCY_MS := $(TARGET_LATENCY_MS)
+endif
+ifdef LATENCY_METRIC
+BENCHMARK_LATENCY_METRIC := $(LATENCY_METRIC)
+endif
+ifdef SCENE_INCREMENT
+BENCHMARK_SCENE_INCREMENT := $(SCENE_INCREMENT)
+endif
+
+BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
+	python3 -m venv venv 2>/dev/null && \
+	. venv/bin/activate && \
+	pip3 install -q -r requirements.txt && \
+	pip3 install -q -e . && \
+	cd $(CURDIR)
+
+.PHONY: benchmark
+benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║       SAD Benchmark — Single Scene                             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo "  Target Latency: $(BENCHMARK_TARGET_LATENCY_MS)ms"
+	@echo "  Results Dir:    $(RESULTS_PATH)"
+	@echo ""
+	mkdir -p $(RESULTS_PATH)
+	$(BENCHMARK_VENV) && \
+	python3 $(SAD_STREAM_DENSITY) run $(CURDIR) \
+		--single_run \
+		--scenes 1 \
+		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
+		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
+		--init_duration $(BENCHMARK_INIT_DURATION) \
+		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
+		--results_dir $(CURDIR)/$(RESULTS_PATH)
+
+.PHONY: benchmark-stream-density
+benchmark-stream-density: demo ## Iteratively increase scenes until latency threshold is reached
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║       SAD Stream Density — Scene-Based Latency Scaling         ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo "  Target Latency:   $(BENCHMARK_TARGET_LATENCY_MS)ms"
+	@echo "  Latency Metric:   $(BENCHMARK_LATENCY_METRIC)"
+	@echo "  Min Throughput:   $(BENCHMARK_MIN_THROUGHPUT_RATIO)"
+	@echo "  Scene Increment:  +$(BENCHMARK_SCENE_INCREMENT) per iteration"
+	@echo "  Init Duration:    $(BENCHMARK_INIT_DURATION)s"
+	@echo "  Stabilise:        $(BENCHMARK_STABILISE_DURATION)s"
+	@echo "  Max Iterations:   $(BENCHMARK_MAX_ITERATIONS)"
+	@echo "  Results Dir:      $(RESULTS_PATH)"
+	@echo ""
+	mkdir -p $(RESULTS_PATH)
+	$(BENCHMARK_VENV) && \
+	python3 $(SAD_STREAM_DENSITY) run $(CURDIR) \
+		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
+		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
+		--scene_increment $(BENCHMARK_SCENE_INCREMENT) \
+		--init_duration $(BENCHMARK_INIT_DURATION) \
+		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
+		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
+		--min_throughput_ratio $(BENCHMARK_MIN_THROUGHPUT_RATIO) \
+		--results_dir $(CURDIR)/$(RESULTS_PATH)
+
+.PHONY: consolidate-metrics
+consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                   Consolidating Metrics                        ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	$(BENCHMARK_VENV) && \
+	python3 $(PERF_TOOLS_DIR)/consolidate_multiple_run_of_metrics.py \
+		--root_directory $(CURDIR)/$(RESULTS_PATH) \
+		--output $(CURDIR)/$(RESULTS_PATH)/consolidated_metrics.csv
+	@echo ""
+	@echo "Results written to: $(RESULTS_PATH)/consolidated_metrics.csv"
+
+.PHONY: stream-density
+stream-density: benchmark-stream-density ## Alias for benchmark-stream-density
+
+.PHONY: generate-stream-density
+generate-stream-density:
+	@echo "Generating stream-density overrides only..."
+	$(BENCHMARK_VENV) && \
+	python3 $(SAD_STREAM_DENSITY) generate $(CURDIR)
+	@echo "To start: make demo"
+
+.PHONY: clean-stream-density
+clean-stream-density:
+	$(BENCHMARK_VENV) && \
+	python3 $(SAD_STREAM_DENSITY) clean $(CURDIR)
+
+.PHONY: down-stream-density
+down-stream-density:
+	$(BENCHMARK_VENV) && \
+	python3 $(SAD_STREAM_DENSITY) down $(CURDIR)
 
 # ---- Build ----
 
@@ -100,8 +224,13 @@ clean-secrets:
 	rm -f $(SCENESCAPE_DIR)/secrets/controller.auth $(SCENESCAPE_DIR)/secrets/browser.auth $(SCENESCAPE_DIR)/secrets/calibration.auth
 	rm -f docker/.env
 
+.PHONY: clean-images
+clean-images:
+	-docker rmi swlp-service:latest behavioral-analysis:latest gradio-ui:latest 2>/dev/null || true
+	-docker rmi scenescape-manager:latest scenescape-controller:latest 2>/dev/null || true
+
 .PHONY: clean-all
-clean-all: clean clean-secrets
+clean-all: clean clean-secrets clean-images
 	rm -rf $(SAMPLE_DATA_DIR)/*.ts
 
 # ---- Help ----
@@ -124,12 +253,22 @@ help:
 	@echo "    make demo-lp         - Start LP services only"
 	@echo "    make down-lp         - Stop LP services"
 	@echo ""
+	@echo "  Stream Density & Benchmarking:"
+	@echo "    make benchmark                 - Single-scene benchmark (1 scene)"
+	@echo "    make benchmark-stream-density  - Increase scenes until latency threshold"
+	@echo "    make consolidate-metrics       - Consolidate metrics to CSV"
+	@echo "    make stream-density            - Alias for benchmark-stream-density"
+	@echo "    make generate-stream-density   - Generate overrides only (no start)"
+	@echo "    make clean-stream-density      - Revert to single camera"
+	@echo "    make down-stream-density       - Stop stream-density services"
+	@echo ""
 	@echo "  Build:"
 	@echo "    make lp-build        - Build LP container images"
 	@echo ""
 	@echo "  Cleanup:"
 	@echo "    make clean           - Stop and remove containers + volumes"
 	@echo "    make clean-secrets   - Remove generated secrets and .env"
+	@echo "    make clean-images    - Remove LP Docker images"
 	@echo "    make clean-all       - Clean everything including videos"
 	@echo ""
 	@echo "  Prerequisites:"
@@ -148,8 +287,6 @@ help:
 	@echo "    make coverage        - Run tests with coverage"
 	@echo "    make coverage-html   - Generate HTML coverage report"
 	@echo "    make log-alert       - Tail alert-service logs"
-	@echo "    make benchmark       - Run end-to-end latency benchmark"
-	@echo "    make benchmark-stream-density - Run stream density benchmark"
 	@echo "    make update-submodules - Update git submodules from remote"
 	@echo "    make help            - Show this help message"
 
@@ -239,14 +376,6 @@ coverage-html:
 .PHONY: log-alert
 log-alert:
 	$(COMPOSE_POI) logs -f alert-service
-
-.PHONY: benchmark
-benchmark:
-	cd backend && python -m backend.benchmark.benchmark
-
-.PHONY: benchmark-stream-density
-benchmark-stream-density:
-	cd backend && python -m backend.benchmark.stream_density
 
 .PHONY: update-submodules
 update-submodules:
