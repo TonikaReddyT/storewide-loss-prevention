@@ -265,8 +265,11 @@ class DetectionIndexRepository(IDetectionIndexRepository):
             key_str = key.decode() if isinstance(key, bytes) else key
             track_id = key_str[len(_REDIS_EXIT_VEC_PREFIX):]
 
-            # Skip if gate still alive — person is still in frame
-            gate_key = f"detection:track:seen:{track_id}".encode()
+            # Skip if gate still alive — person is still in frame.
+            # The gate key uses the raw object_id (without @timestamp suffix),
+            # while track_id here is the unique appearance_id (with @timestamp).
+            base_object_id = track_id.rsplit("@", 1)[0] if "@" in track_id else track_id
+            gate_key = f"detection:track:seen:{base_object_id}".encode()
             if self._r.exists(gate_key):
                 continue
 
@@ -322,13 +325,32 @@ class DetectionIndexRepository(IDetectionIndexRepository):
         """Atomically mark a track as stored (NX). Returns True only the first time.
 
         Used to deduplicate: one embedding per tracker track, not one per frame.
-        Uses track_seen_ttl (default 120s), NOT the 7-day data TTL — so that when
+        Uses track_seen_ttl (default 600s), NOT the 7-day data TTL — so that when
         the SceneScape tracker recycles an integer ID for a new person, the gate
         expires in time and the new person is stored as a distinct detection.
         """
         effective_ttl = ttl if ttl is not None else self._track_seen_ttl
         key = f"detection:track:seen:{track_id}".encode()
         return bool(self._r.set(key, b"1", ex=effective_ttl, nx=True))
+
+    def set_active_appearance(self, object_id: str, appearance_id: str) -> None:
+        """Store the current appearance ID for a camera-local object_id.
+
+        When claim_track succeeds (new appearance window), the consumer creates
+        a unique appearance_id (e.g. ``cam:Camera_02:1@1715100000``) and stores
+        it here.  Subsequent frames for the same object_id (while the gate is
+        alive) use this to find the correct appearance_id for exit-vector updates.
+        TTL matches the track gate + a small buffer.
+        """
+        key = f"detection:active_appearance:{object_id}".encode()
+        self._r.setex(key, self._track_seen_ttl + 60, appearance_id.encode())
+
+    def get_active_appearance(self, object_id: str) -> Optional[str]:
+        """Return the active appearance ID for an object_id, or None."""
+        raw = self._r.get(f"detection:active_appearance:{object_id}".encode())
+        if raw is None:
+            return None
+        return raw.decode() if isinstance(raw, bytes) else raw
 
     # ── Private ─────────────────────────────────────────────────────────────
 

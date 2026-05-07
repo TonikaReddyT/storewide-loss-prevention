@@ -248,21 +248,38 @@ class EventConsumer:
                     "No UUID resolved for camera=%s person=%s — using camera-local ID %s",
                     camera_id, person_int_id, object_id,
                 )
-            # ── Detection index: store one embedding per unique track (not per frame) ──
+            # ── Detection index: store one embedding per unique appearance ──
+            # Each time claim_track succeeds, a new person appearance window starts.
+            # We create a unique appearance_id (object_id + timestamp) so that when
+            # the camera-local ID is recycled for a different person, FAISS entries
+            # are NOT grouped together.  The appearance_id is stored in Redis so
+            # subsequent frames (exit vector updates) use the same one.
             new_faiss_id: int = -1
+            appearance_id = object_id  # fallback if detection index disabled
             if self._detection_index is not None:
                 import numpy as _np
+                import time as _time
                 try:
                     if self._detection_index.claim_track(object_id):
+                        # New appearance window — create unique appearance_id
+                        appearance_id = f"{object_id}@{int(_time.time())}"
+                        self._detection_index.set_active_appearance(object_id, appearance_id)
                         new_faiss_id = self._detection_index.add(
                             vector=_np.array(embedding_vector, dtype=_np.float32),
                             camera_id=camera_id,
-                            track_id=object_id,
+                            track_id=appearance_id,
                             timestamp=timestamp,
                             bbox=best_face_bbox,
                         )
-                        log.info("DetectionIndex: new track stored %s faiss_id=%d", object_id, new_faiss_id)
+                        log.info(
+                            "DetectionIndex: new appearance stored %s (object=%s) faiss_id=%d",
+                            appearance_id, object_id, new_faiss_id,
+                        )
                     else:
+                        # Same person still in frame — look up the active appearance_id
+                        appearance_id = (
+                            self._detection_index.get_active_appearance(object_id) or object_id
+                        )
                         log.debug("DetectionIndex: track already stored, skipping %s", object_id)
                 except Exception:
                     log.debug("DetectionIndex.add failed for %s", object_id, exc_info=True)
@@ -280,16 +297,16 @@ class EventConsumer:
             # Store frame keyed by faiss_id (unique per detection, never overwritten).
             if new_faiss_id >= 0 and frame_b64 and self._detection_index is not None:
                 self._detection_index.store_frame(new_faiss_id, frame_b64)
-                log.info("Detection frame stored: faiss_id=%d track=%s", new_faiss_id, object_id)
+                log.info("Detection frame stored: faiss_id=%d track=%s", new_faiss_id, appearance_id)
 
-            # Always update the rolling exit vector for this track (overwritten each
-            # detection).  When the person leaves, the last value stored here becomes
-            # the effective "exit" embedding — searched at query time via search_exits().
+            # Always update the rolling exit vector for this appearance (overwritten
+            # each detection).  When the person leaves, the last value stored here
+            # becomes the effective "exit" embedding — searched at query time.
             if self._detection_index is not None:
                 import numpy as _np2
                 try:
                     self._detection_index.update_exit(
-                        track_id=object_id,
+                        track_id=appearance_id,
                         vector=_np2.array(embedding_vector, dtype=_np2.float32),
                         camera_id=camera_id,
                         timestamp=timestamp,
@@ -297,7 +314,7 @@ class EventConsumer:
                         b64_frame=frame_b64,
                     )
                 except Exception:
-                    log.debug("update_exit failed for %s", object_id, exc_info=True)
+                    log.debug("update_exit failed for %s", appearance_id, exc_info=True)
 
             if self._event_repo is not None:
                 self._capture_track_frames(object_id, frame_b64)
