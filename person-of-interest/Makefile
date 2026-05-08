@@ -133,23 +133,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	cd $(CURDIR)
 
 .PHONY: benchmark
-benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║       SAD Benchmark — Single Scene                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo "  Target Latency: $(BENCHMARK_TARGET_LATENCY_MS)ms"
-	@echo "  Results Dir:    $(RESULTS_PATH)"
-	@echo ""
-	mkdir -p $(RESULTS_PATH)
-	$(BENCHMARK_VENV) && \
-	python3 $(SAD_STREAM_DENSITY) run $(CURDIR) \
-		--single_run \
-		--scenes 1 \
-		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
-		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
-		--init_duration $(BENCHMARK_INIT_DURATION) \
-		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+benchmark: poi-benchmark ## Alias — runs poi-benchmark (single scene)
 
 .PHONY: benchmark-stream-density
 benchmark-stream-density: demo ## Iteratively increase scenes until latency threshold is reached
