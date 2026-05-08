@@ -136,30 +136,7 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 benchmark: poi-benchmark ## Alias — runs poi-benchmark (single scene)
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: demo ## Iteratively increase scenes until latency threshold is reached
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║       SAD Stream Density — Scene-Based Latency Scaling         ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo "  Target Latency:   $(BENCHMARK_TARGET_LATENCY_MS)ms"
-	@echo "  Latency Metric:   $(BENCHMARK_LATENCY_METRIC)"
-	@echo "  Min Throughput:   $(BENCHMARK_MIN_THROUGHPUT_RATIO)"
-	@echo "  Scene Increment:  +$(BENCHMARK_SCENE_INCREMENT) per iteration"
-	@echo "  Init Duration:    $(BENCHMARK_INIT_DURATION)s"
-	@echo "  Stabilise:        $(BENCHMARK_STABILISE_DURATION)s"
-	@echo "  Max Iterations:   $(BENCHMARK_MAX_ITERATIONS)"
-	@echo "  Results Dir:      $(RESULTS_PATH)"
-	@echo ""
-	mkdir -p $(RESULTS_PATH)
-	$(BENCHMARK_VENV) && \
-	python3 $(SAD_STREAM_DENSITY) run $(CURDIR) \
-		--target_latency_ms $(BENCHMARK_TARGET_LATENCY_MS) \
-		--latency_metric $(BENCHMARK_LATENCY_METRIC) \
-		--scene_increment $(BENCHMARK_SCENE_INCREMENT) \
-		--init_duration $(BENCHMARK_INIT_DURATION) \
-		--stabilise_duration $(BENCHMARK_STABILISE_DURATION) \
-		--max_iterations $(BENCHMARK_MAX_ITERATIONS) \
-		--min_throughput_ratio $(BENCHMARK_MIN_THROUGHPUT_RATIO) \
-		--results_dir $(CURDIR)/$(RESULTS_PATH)
+benchmark-stream-density: poi-benchmark-stream-density ## Alias — runs poi-benchmark-stream-density
 
 .PHONY: consolidate-metrics
 consolidate-metrics: ## Consolidate benchmark metrics from results/ into a CSV
