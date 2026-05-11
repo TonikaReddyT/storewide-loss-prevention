@@ -235,7 +235,7 @@ poi-benchmark: ## Run a single-scene POI benchmark (detection-to-alert latency)
 		--results_dir $(CURDIR)/$(RESULTS_PATH)
 
 .PHONY: poi-benchmark-stream-density
-poi-benchmark-stream-density: demo ## Iteratively increase scenes until POI latency threshold
+poi-benchmark-stream-density: ## Iteratively increase scenes until POI latency threshold
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       POI Stream Density — Detection-to-Alert Scaling          ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"

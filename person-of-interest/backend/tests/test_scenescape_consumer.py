@@ -48,7 +48,8 @@ def test_region_entry_detected(consumer, event_service):
     payload = _make_payload("2025-01-15T12:00:00Z", [person])
     consumer.handle_event(_TOPIC, payload)
     event_service.store_region_entry.assert_called_once_with(
-        "person-1", "2025-01-15T12:00:00Z", "scene-001", "zone-a", "Zone A", None
+        "person-1", "2025-01-15T12:00:00Z", "scene-001", "zone-a", "Zone A", None,
+        entry_frame_key=None,
     )
     event_service.store_region_exit.assert_not_called()
 

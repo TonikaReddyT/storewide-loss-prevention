@@ -99,7 +99,8 @@ class TestAlertService:
         assert result.match["camera_id"] == "cam-01"
         assert result.match["confidence"] == 0.95
         assert result.match["similarity_score"] == 0.88
-        assert result.poi_metadata["notes"] == "test suspect"
+        assert result.poi_metadata["name"] == "test suspect"
+        assert result.poi_metadata["notes"] == ""
 
     def test_strategy_error_doesnt_halt_dispatch(self):
         """All strategies are attempted even if one fails, but alert is NOT

@@ -55,6 +55,7 @@ class TestEventConsumer:
         event_repo = MagicMock()
         event_repo.claim_thumbnail.return_value = False
         event_repo.get_thumbnail.return_value = None
+        event_repo.get_uuid_for_camera_bbox.return_value = None
 
         consumer = EventConsumer(matching, events, alert_service, bus, event_repo=event_repo)
         return consumer, matching, events, alert_service, bus
