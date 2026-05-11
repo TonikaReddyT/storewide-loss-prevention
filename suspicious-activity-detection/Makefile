@@ -20,6 +20,13 @@ COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_
 
 RESULTS_PATH ?= ./results
 
+TAG := $(shell cat VERSION 2>/dev/null || echo latest)
+export TAG
+REGISTRY_URL = intel/
+
+# Normalize REGISTRY to lowercase for case-insensitive comparison
+REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
+
 # Auto-shutdown timeout in minutes (0 = disabled)
 AUTO_STOP_MINUTES ?= 20
 
@@ -37,14 +44,22 @@ init:
 
 .PHONY: up
 up:
-	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
+	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) init init-sample-data download-models init-volumes
 	@mkdir -p $(RESULTS_PATH)
+ifeq ($(REGISTRY_LOWER),true)
+	@echo ""
+	@echo "=== Pulling LP images from $(REGISTRY_URL) ==="
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis gradio-ui
+else
 	@echo ""
 	@echo "=== Building LP images ==="
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
+endif
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
+	@echo ""
+	@echo "=== Waiting for VDMS + scene controller to settle ==="
 	
 	
 	@echo ""
@@ -109,10 +124,15 @@ status:
 
 .PHONY: demo-lp
 demo-lp:
+ifeq ($(REGISTRY_LOWER),true)
+	@echo "Pulling LP images from $(REGISTRY_URL)..."
+	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis gradio-ui
+else
 	@echo "Building LP images..."
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis gradio-ui
+endif
 	@echo "Starting LP services only (SceneScape must be running)..."
-	$(COMPOSE_LP) up -d
+	$(COMPOSE_ALL) up -d swlp-service behavioral-analysis gradio-ui
 
 .PHONY: down-lp
 down-lp:

@@ -128,10 +128,10 @@ Before starting, ensure these files are in place:
 cd suspicious-activity-detection
 
 # Single command — generates secrets, downloads models, builds, and starts all services
-make demo
+make up
 ```
 
-`make demo` performs the following steps automatically:
+`make up` performs the following steps automatically:
 1. Generates TLS certificates, SceneScape secrets, and `docker/.env`
 2. Copies sample video into the Docker volume
 3. Downloads OpenVINO models (person-detection + re-identification)
@@ -203,7 +203,7 @@ make clean-all
 
 ### Configuration
 
-All environment variables are in `configs/.env.example`. The `make demo` command auto-generates `docker/.env` — you do not need to create it manually.
+All environment variables are in `configs/.env.example`. The `make up` command auto-generates `docker/.env` — you do not need to create it manually.
 
 Key variables you may want to customize in `configs/.env.example` before running:
 
@@ -234,7 +234,7 @@ Zone names must match the region names defined in your SceneScape scene.
 
 ## Services Started
 
-`make demo` starts the following containers:
+`make up` starts the following containers:
 
 | Container | Port | Description |
 |-----------|------|-------------|
