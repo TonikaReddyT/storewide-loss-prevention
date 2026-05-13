@@ -45,20 +45,11 @@ patterns:
       enabled: true
       num_frames: 4
       prompt: |
-        Analyze 4 sequential CCTV frames of one person for CONCEALMENT.
-
-        Suspicious=true REQUIRES ALL of these:
-        1. Person's hand picks up a PRODUCT from a shelf (item must be visible in hand)
-        2. That same item moves toward body/pocket/bag/clothing to be hidden
-
-        Suspicious=false if:
-        - No product visible in hand (just hand motion is NOT enough)
-        - Person puts item in cart/basket or carries it openly
-        - Person is only browsing, touching, or comparing items on shelf
-        - Hand moves to waist but was already empty
-
-        Respond with JSON only:
-        {"suspicious": true|false, "confidence": 0.0-1.0, "reasoning": "one sentence"}
+        Analyze 4 sequential CCTV frames of one shopper for CONCEALMENT.
+        Suspicious=true if: hand reaches toward shelf then moves toward waist/pocket/bag/clothing in a concealing motion.
+        Suspicious=false if: just browsing, using cart/basket, adjusting own belongings, walking normally.
+        Output JSON only:
+        {"suspicious":true|false,"confidence":0.0-1.0,"reasoning":"one sentence"}
       response_fields:
         - suspicious
         - confidence

@@ -42,19 +42,18 @@ init:
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: up
+
 up:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
-ifeq ($(REGISTRY_LOWER),true)
-	@echo ""
-	@echo "=== Pulling LP images from $(REGISTRY_URL) ==="
-	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
-else
-	@echo ""
-	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
-endif
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Pulling LP images from $(REGISTRY_URL)..."; \
+		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
+	else \
+		echo "Building LP images..."; \
+		$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui; \
+	fi
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
