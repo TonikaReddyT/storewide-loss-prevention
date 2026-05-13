@@ -61,6 +61,9 @@ class FrameManager:
 
         # Per-person tracking of BA-bucket keys (used by cleanup helpers).
         self._person_ba_keys: Dict[str, List[str]] = {}
+        # Per-visit tracking: last cutoff_ms copied to alerts bucket.
+        # Key = src_prefix (visit path), value = last cutoff_ms copied.
+        self._last_alert_cutoff: Dict[str, int] = {}
 
         self.client: Optional["Minio"] = None
         if Minio:
@@ -206,6 +209,9 @@ class FrameManager:
             )
             return 0
 
+        # Only copy frames after the previous alert's cutoff for this visit.
+        prev_cutoff = self._last_alert_cutoff.get(src_prefix, 0)
+
         for obj in objects:
             name = obj.object_name
             stem = name.rsplit("/", 1)[-1].rsplit(".", 1)[0]
@@ -214,7 +220,7 @@ class FrameManager:
             except ValueError:
                 skipped += 1
                 continue
-            if ts_ms > cutoff_ms:
+            if ts_ms > cutoff_ms or ts_ms <= prev_cutoff:
                 skipped += 1
                 continue
             dst_key = f"{dst_prefix}{ts_ms}.jpg"
@@ -230,6 +236,9 @@ class FrameManager:
                     src=name, dst=dst_key,
                 )
 
+        # Update the cutoff so the next alert for this visit starts here.
+        self._last_alert_cutoff[src_prefix] = cutoff_ms
+
         logger.info(
             "copy_frames_to_alert done",
             alert_id=alert_id,
@@ -237,6 +246,7 @@ class FrameManager:
             region_id=region_id,
             entry_timestamp=entry_timestamp,
             cutoff_ms=cutoff_ms,
+            prev_cutoff=prev_cutoff,
             listed=len(objects),
             copied=copied,
             skipped=skipped,
