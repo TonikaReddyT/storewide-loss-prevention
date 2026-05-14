@@ -44,6 +44,7 @@ _mqtt_lock = threading.Lock()
 _latest_frame = {}      # {camera_id: base64_jpeg}
 _latest_detections = []  # list of objects from regulated scene data
 _video_lock = threading.Lock()
+_last_camera_ts = 0.0  # throttle: timestamp of last accepted camera frame
 
 
 def _on_mqtt_connect(client, userdata, flags, rc):
@@ -57,25 +58,37 @@ def _on_mqtt_connect(client, userdata, flags, rc):
 
 
 def _on_mqtt_message(client, userdata, msg):
-    try:
-        payload = json.loads(msg.payload.decode())
-    except Exception as e:
-        print(f"[MQTT] Failed to parse message on {msg.topic}: {e}")
-        return
+    global _last_camera_ts
 
     if msg.topic.startswith("scenescape/image/camera/"):
+        # Throttle: skip if last frame was < 180ms ago (match 5 FPS render)
+        now = time.monotonic()
+        if now - _last_camera_ts < 0.18:
+            return
         camera_id = msg.topic.split("/")[-1]
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _video_lock:
             _latest_frame[camera_id] = payload.get("image", "")
-        global _frame_dirty
-        _frame_dirty = True
+        _last_camera_ts = now
+        _frame_event.set()
     elif msg.topic.startswith("scenescape/regulated/scene/"):
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _video_lock:
             _latest_detections.clear()
             for obj in payload.get("objects", []):
                 _latest_detections.append(obj)
-        _frame_dirty = True
+        _frame_event.set()
     elif msg.topic.startswith("alerts"):
+        try:
+            payload = json.loads(msg.payload.decode())
+        except Exception:
+            return
         with _mqtt_lock:
             _mqtt_alerts.appendleft(payload)
 
@@ -144,16 +157,13 @@ def _get_color(obj_id):
 # Pre-render annotated frame in MQTT thread to avoid work during poll
 _rendered_frame = None
 _rendered_lock = threading.Lock()
-_frame_dirty = True  # Flag: new data arrived since last render
+_rendered_jpeg = b""  # Pre-encoded JPEG bytes
+_frame_event = threading.Event()  # Signalled when new MQTT data arrives
 
 
 def _render_frame():
-    """Render the latest frame with detections. Called lazily on UI poll."""
-    global _rendered_frame, _frame_dirty
-    # Skip if nothing changed since last render
-    if not _frame_dirty:
-        return
-    _frame_dirty = False
+    """Render the latest frame with detections."""
+    global _rendered_frame, _rendered_jpeg
 
     with _video_lock:
         frame_b64 = _latest_frame.get("lp-camera1", "")
@@ -205,19 +215,28 @@ def _render_frame():
         draw.rectangle([bbox[0] - 1, bbox[1] - 1, bbox[2] + 1, bbox[3] + 1], fill=color)
         draw.text((x, y - 18), label, fill=(0, 0, 0), font=_FONT)
 
+    # Encode JPEG outside lock to minimize lock hold time
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=65)
+    jpeg_bytes = buf.getvalue()
+
     with _rendered_lock:
         _rendered_frame = img
+        _rendered_jpeg = jpeg_bytes
 
 
 # ── Background render thread ──────────────────────────────────────────────────
 def _render_loop():
-    """Background thread: render at ~10 FPS."""
+    """Background thread: wait for new frame, render at ~5 FPS max."""
     while True:
+        # Block until MQTT delivers a new frame (no CPU spin)
+        _frame_event.wait(timeout=1.0)
+        _frame_event.clear()
         try:
             _render_frame()
         except Exception as e:
             print(f"[Render] error: {e}")
-        time.sleep(0.1)  # ~10 FPS cap
+        time.sleep(0.2)  # ~5 FPS cap
 
 
 _render_thread = threading.Thread(target=_render_loop, daemon=True)
@@ -251,21 +270,18 @@ def _mjpeg_generator():
             + jpeg + b"\r\n"
         )
         time.sleep(0.5)
-    # Stream live frames
+    # Stream live frames — just yield pre-encoded JPEG bytes
     while True:
         with _rendered_lock:
-            frame = _rendered_frame
-        if frame is not None:
-            buf = io.BytesIO()
-            frame.save(buf, format="JPEG", quality=75)
-            jpeg = buf.getvalue()
+            jpeg = _rendered_jpeg
+        if jpeg:
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n"
                 b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n"
                 + jpeg + b"\r\n"
             )
-        time.sleep(0.1)  # ~10 FPS
+        time.sleep(0.2)  # ~5 FPS
 
 
 def get_scene_name():
@@ -504,7 +520,8 @@ div[class*="footer"], a[href*="gradio.app"] { display: none !important; }
 }
 """
 
-with gr.Blocks(title="Storewide Loss Prevention Dashboard", css=CUSTOM_CSS) as demo:
+with gr.Blocks(title="Storewide Loss Prevention Dashboard") as demo:
+    gr.HTML(f"<style>{CUSTOM_CSS}</style>")
     gr.HTML(HEADER_HTML)
 
     # ── Top row: Live Video (left) | Zones + Sessions (right) ──
