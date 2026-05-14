@@ -317,6 +317,7 @@ build:
 
 .PHONY: build-lp
 build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suscpicious-ui)
+	@if [ ! -f docker/.env ]; then echo "TAG=$(TAG)" > docker/.env; fi
 	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
 
 # ---- Cleanup ----
