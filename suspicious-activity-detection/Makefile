@@ -315,6 +315,12 @@ down-stream-density:
 build:
 	$(COMPOSE_SCENESCAPE) build
 
+.PHONY: build-lp
+build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suscpicious-ui)
+	docker build -t intel/swlp-behavioral-analysis:$(TAG) -f behavioral-analysis/Dockerfile behavioral-analysis/
+	docker build -t intel/swlp-service:$(TAG) -f swlp-service/Dockerfile .
+	docker build -t intel/swlp-suscpicious-ui:$(TAG) -f ui/Dockerfile ui/
+
 # ---- Cleanup ----
 
 .PHONY: clean
