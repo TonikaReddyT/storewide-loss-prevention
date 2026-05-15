@@ -5,3 +5,21 @@ services:
     volumes:
       - ../scenescape/controller/patches/moving_object.py:/usr/local/lib/python3.11/site-packages/controller/moving_object.py:ro
       - ../scenescape/controller/patches/vdms_adapter.py:/usr/local/lib/python3.11/site-packages/controller/vdms_adapter.py:ro
+
+  # Expose WebRTC ICE port for browser playback
+  mediaserver:
+    ports:
+      - "8189:8189/udp"
+
+  # Re-encode to baseline H264 (no B-frames) so WebRTC playback works
+  lp-cams:
+    command: >
+      -nostdin -re -stream_loop -1 -i /workspace/media/${VIDEO_FILE:-Camera_01.mp4}
+      -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency -b:v 2M -an
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/${CAMERA_NAME:-Camera_01}
+
+  lp-cams-2:
+    command: >
+      -nostdin -re -stream_loop -1 -i /workspace/media/${VIDEO_FILE_2:-Camera_02.mp4}
+      -c:v libx264 -profile:v baseline -preset ultrafast -tune zerolatency -b:v 2M -an
+      -f rtsp -rtsp_transport tcp rtsp://mediaserver:8554/${CAMERA_NAME_2:-Camera_02}

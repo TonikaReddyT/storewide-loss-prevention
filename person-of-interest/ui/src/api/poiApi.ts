@@ -58,3 +58,22 @@ export async function searchHistory({ image, topK = 20, startTime = '', endTime 
   }
   return res.json();
 }
+
+export interface CameraInfo {
+  camera_id: string;
+  name: string;
+  stream_path: string;
+  status?: string;
+}
+
+export interface CamerasResponse {
+  cameras: CameraInfo[];
+  count: number;
+  mediamtx_webrtc_port: number;
+}
+
+export async function fetchCameras(): Promise<CamerasResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/cameras`);
+  if (!res.ok) throw new Error(`Failed to fetch cameras: ${res.statusText}`);
+  return res.json();
+}
