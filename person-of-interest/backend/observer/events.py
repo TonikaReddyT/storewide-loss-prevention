@@ -1,0 +1,52 @@
+"""Observer pattern for match-found events and alert triggering."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass, field
+from typing import Callable
+
+from backend.domain.entities.match_result import AlertPayload
+
+log = logging.getLogger("poi.observer")
+
+
+@dataclass
+class MatchFoundEvent:
+    """Domain event emitted when a POI match is found."""
+
+    alert: AlertPayload
+    object_id: str
+    timestamp: str
+
+
+class EventBus:
+    """Simple in-process event bus — Observer Pattern.
+
+    Observers register callbacks that are invoked when events are published.
+    """
+
+    def __init__(self) -> None:
+        self._listeners: dict[str, list[Callable]] = {}
+
+    def subscribe(self, event_type: str, callback: Callable) -> None:
+        self._listeners.setdefault(event_type, []).append(callback)
+        log.debug("Subscriber registered for %s", event_type)
+
+    def publish(self, event_type: str, event) -> None:
+        for cb in self._listeners.get(event_type, []):
+            try:
+                cb(event)
+            except Exception:
+                log.exception("Error in event handler for %s", event_type)
+
+    async def publish_async(self, event_type: str, event) -> None:
+        for cb in self._listeners.get(event_type, []):
+            try:
+                if asyncio.iscoroutinefunction(cb):
+                    await cb(event)
+                else:
+                    cb(event)
+            except Exception:
+                log.exception("Error in async event handler for %s", event_type)

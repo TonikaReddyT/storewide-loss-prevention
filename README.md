@@ -1,17 +1,21 @@
 # Store-wide Loss Prevention
 
-Store-wide Loss Prevention is an AI-powered retail security solution built on
-Intel® SceneScape and Intel® hardware (CPU, GPU, NPU). It uses real-time
-multi-camera tracking, pose estimation, and vision-language models to detect
-and alert on suspicious in-store behaviors — enabling proactive loss prevention
-without intrusive surveillance.
+A suite of Intel® edge AI applications for retail loss prevention, powered by Intel® SceneScape spatial computing and Intel® OpenVINO™ inference.
 
 ## Use Cases
 
 | # | Use Case | Status | Directory |
 |---|----------|--------|-----------|
-| 1 | [Suspicious Activity Detection](#suspicious-activity-detection) | Available | `suspicious-activity-detection/` |
-| 2 | [Person of Interest (POI)](#person-of-interest) | TBD | — |
+| 1 | [Person of Interest (POI)](#person-of-interest) | Available | `person-of-interest/` |
+| 2 | [Suspicious Activity Detection](#suspicious-activity-detection) | Available | `suspicious-activity-detection/` |
+
+---
+
+### Person of Interest
+
+Real-time detection of enrolled suspects across multiple cameras using face re-identification and FAISS vector search, with historical investigation capabilities.
+
+For full details see the [POI User Guide](person-of-interest/docs/user-guide/index.md).
 
 ---
 
@@ -33,10 +37,4 @@ separate service invoked conditionally when a person enters a high-value zone.
 | 4 | Repeated Visits | Re-entries ≥ threshold to same HIGH_VALUE zone | WARNING |
 | 5 | Restricted Zone Violation | Entered RESTRICTED zone | CRITICAL |
 
-For full details see the [User Guide](suspicious-activity-detection/docs/user-guide/index.md).
-
----
-
-### Person of Interest
-
-TBD
+For full details see the [SAD User Guide](suspicious-activity-detection/docs/user-guide/index.md).

@@ -1,0 +1,1 @@
+"""POI MCP Server package."""

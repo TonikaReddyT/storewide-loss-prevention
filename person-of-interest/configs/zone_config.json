@@ -1,0 +1,61 @@
+{
+  "_comment": "Single source of truth for all app-specific configuration. init.sh reads this to generate docker/.env",
+  "scene_name": "conference room",
+  "scene_zip": "conference-room.zip",
+  "cameras": [
+    {
+      "name": "Camera_01",
+      "video": "Camera_01.mp4"
+    },
+    {
+      "name": "Camera_02",
+      "video": "Camera_02.mp4"
+    }
+  ],
+  "models": "person-detection-retail-0013,person-reidentification-retail-0277,face-detection-retail-0004,face-reidentification-retail-0095",
+  "model_precision": "FP32",
+  "scenescape": {
+    "registry": "",
+    "version": "latest",
+    "controller_image": "scenescape-controller",
+    "manager_image": "scenescape-manager",
+    "dlstreamer_version": "2026.1.0-20260331-weekly-ubuntu24",
+    "api_user": "admin"
+  },
+  "store": {
+    "name": "Retail",
+    "id": "store_001"
+  },
+  "services": {
+    "lp_service_port": 8082,
+    "log_level": "INFO",
+    "seaweedfs_s3_port": 8333,
+    "seaweedfs_master_port": 9333,
+    "seaweedfs_volume_port": 8080
+  },
+  "scenescape_api": {
+    "base_url": "https://localhost",
+    "auth_path": "/api/v1/auth",
+    "scenes_path": "/api/v1/scenes",
+    "regions_path": "/api/v1/regions",
+    "verify_ssl": false
+  },
+  "zones": {
+    "_comment": "Map zone names (as created in SceneScape UI) to zone types",
+    "entry": "ENTRY",
+    "exit": "EXIT",
+    "high_value": "HIGH_VALUE",
+    "checkout": "CHECKOUT"
+  },
+  "benchmark": {
+    "target_latency_ms": 2000,
+    "latency_metric": "avg",
+    "scene_increment": 1,
+    "init_duration": 90,
+    "stabilise_duration": 30,
+    "max_iterations": 50,
+    "min_throughput_ratio": 0.5,
+    "results_path": "./results"
+  },
+  "stream_density": 2
+}

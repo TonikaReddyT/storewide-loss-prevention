@@ -26,7 +26,6 @@ SECRETS_DIR="${SCENESCAPE_DIR}/secrets"
 ENV_FILE="${APP_DIR}/docker/.env"
 SAMPLE_DATA_DIR="${SCENESCAPE_DIR}/sample_data"
 ZONE_CONFIG="${APP_DIR}/configs/zone_config.json"
-DLSTREAMER_CONFIG="${SCENESCAPE_DIR}/dlstreamer-pipeline-server/${APP_NAME}-pipeline-config.json"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -48,56 +47,105 @@ else
     SECRETS_GENERATED=1
 fi
 
-# ---- Step 2: Read zone_config.json ----
+# ---- Step 2: Read zone_config.json (single source of truth) ----
 echo -e "${YELLOW}[2/4] Reading zone_config.json...${NC}"
 if [ ! -f "${ZONE_CONFIG}" ]; then
     echo -e "${RED}ERROR: zone_config.json not found at ${ZONE_CONFIG}${NC}"
     exit 1
 fi
 
-# Read base scene config and stream_density
-CONFIG_VALUES=$(python3 -c "
-import json
+# Extract all configuration from zone_config.json in one pass
+eval "$(python3 -c "
+import json, sys
+
 cfg = json.load(open('${ZONE_CONFIG}'))
-# Support both flat format and scenes array (backward compat)
-scenes = cfg.get('scenes', [])
-if scenes:
-    s = scenes[0]
-    sn = s.get('scene_name', '')
-    cn = s.get('cameras', [s.get('camera_name', '')])[0] if s.get('cameras') or s.get('camera_name') else ''
-    vf = s.get('video_file', '')
-    sz = s.get('scene_zip', '')
-    sd = cfg.get('stream_density', 1)
+
+# Scene
+print(f'SCENE_NAME=\"{cfg.get(\"scene_name\", \"\")}\"')
+print(f'SCENE_ZIP=\"{cfg.get(\"scene_zip\", \"\")}\"')
+
+# Cameras (new array format or legacy flat fields)
+cameras = cfg.get('cameras', [])
+if cameras:
+    print(f'CAMERA_NAME=\"{cameras[0].get(\"name\", \"\")}\"')
+    print(f'VIDEO_FILE=\"{cameras[0].get(\"video\", \"\")}\"')
+    if len(cameras) > 1:
+        print(f'CAMERA_NAME_2=\"{cameras[1].get(\"name\", \"\")}\"')
+        print(f'VIDEO_FILE_2=\"{cameras[1].get(\"video\", \"\")}\"')
+    else:
+        print('CAMERA_NAME_2=\"\"')
+        print('VIDEO_FILE_2=\"\"')
 else:
-    sn = cfg.get('scene_name', '')
-    cn = cfg.get('camera_name', '')
-    vf = cfg.get('video_file', '')
-    sz = cfg.get('scene_zip', '')
-    sd = cfg.get('stream_density', 1)
-print(f'{sn}|{cn}|{vf}|{sz}|{sd}')
-" 2>/dev/null)
-IFS='|' read -r SCENE_NAME CAMERA_NAME VIDEO_FILE SCENE_ZIP_BASE STREAM_DENSITY <<< "${CONFIG_VALUES}"
+    # Legacy flat fields
+    print(f'CAMERA_NAME=\"{cfg.get(\"camera_name\", \"\")}\"')
+    print(f'VIDEO_FILE=\"{cfg.get(\"video_file\", \"\")}\"')
+    print(f'CAMERA_NAME_2=\"{cfg.get(\"camera_name_2\", \"\")}\"')
+    print(f'VIDEO_FILE_2=\"{cfg.get(\"video_file_2\", \"\")}\"')
 
-# Defaults
-STREAM_DENSITY="${STREAM_DENSITY:-1}"
+# Models
+print(f'MODELS=\"{cfg.get(\"models\", \"\")}\"')
+print(f'MODEL_PRECISION=\"{cfg.get(\"model_precision\", \"FP32\")}\"')
+
+# SceneScape images
+ss = cfg.get('scenescape', {})
+print(f'SCENESCAPE_REGISTRY=\"{ss.get(\"registry\", \"\")}\"')
+print(f'SCENESCAPE_VERSION=\"{ss.get(\"version\", \"latest\")}\"')
+print(f'SCENESCAPE_CONTROLLER_IMAGE=\"{ss.get(\"controller_image\", \"intel/scenescape-controller\")}\"')
+print(f'SCENESCAPE_MANAGER_IMAGE=\"{ss.get(\"manager_image\", \"intel/scenescape-manager\")}\"')
+print(f'DLSTREAMER_VERSION=\"{ss.get(\"dlstreamer_version\", \"2026.1.0-20260331-weekly-ubuntu24\")}\"')
+print(f'SCENESCAPE_API_USER=\"{ss.get(\"api_user\", \"admin\")}\"')
+
+# Store
+store = cfg.get('store', {})
+print(f'STORE_NAME=\"{store.get(\"name\", \"Retail\")}\"')
+print(f'STORE_ID=\"{store.get(\"id\", \"store_001\")}\"')
+
+# Services
+svc = cfg.get('services', {})
+print(f'LP_SERVICE_PORT=\"{svc.get(\"lp_service_port\", 8082)}\"')
+print(f'LOG_LEVEL=\"{svc.get(\"log_level\", \"INFO\")}\"')
+print(f'SEAWEEDFS_S3_PORT=\"{svc.get(\"seaweedfs_s3_port\", 8333)}\"')
+print(f'SEAWEEDFS_MASTER_PORT=\"{svc.get(\"seaweedfs_master_port\", 9333)}\"')
+print(f'SEAWEEDFS_VOLUME_PORT=\"{svc.get(\"seaweedfs_volume_port\", 8080)}\"')
+
+# Benchmark
+bm = cfg.get('benchmark', {})
+print(f'BENCHMARK_TARGET_LATENCY_MS=\"{bm.get(\"target_latency_ms\", 2000)}\"')
+print(f'BENCHMARK_LATENCY_METRIC=\"{bm.get(\"latency_metric\", \"avg\")}\"')
+print(f'BENCHMARK_SCENE_INCREMENT=\"{bm.get(\"scene_increment\", 1)}\"')
+print(f'BENCHMARK_INIT_DURATION=\"{bm.get(\"init_duration\", 90)}\"')
+print(f'BENCHMARK_STABILISE_DURATION=\"{bm.get(\"stabilise_duration\", 30)}\"')
+print(f'BENCHMARK_MAX_ITERATIONS=\"{bm.get(\"max_iterations\", 50)}\"')
+print(f'BENCHMARK_MIN_THROUGHPUT_RATIO=\"{bm.get(\"min_throughput_ratio\", 0.5)}\"')
+print(f'RESULTS_PATH=\"{bm.get(\"results_path\", \"./results\")}\"')
+" 2>/dev/null)"
+
+# Apply defaults for required fields
+SCENE_ZIP="${SCENE_ZIP:-storewide-loss-prevention.zip}"
 VIDEO_FILE="${VIDEO_FILE:-lp-camera1.mp4}"
-SCENE_ZIP_BASE="${SCENE_ZIP_BASE:-storewide-loss-prevention.zip}"
+MODELS="${MODELS:-person-detection-retail-0013,person-reidentification-retail-0277}"
 
-echo "  Scene name:      ${SCENE_NAME}"
-echo "  Camera name:     ${CAMERA_NAME}"
-echo "  Video file:      ${VIDEO_FILE}"
-echo "  Base scene zip:  ${SCENE_ZIP_BASE}"
-echo "  Stream density:  ${STREAM_DENSITY}"
+echo "  Scene name:  ${SCENE_NAME}"
+echo "  Camera name: ${CAMERA_NAME}"
+if [ -n "${CAMERA_NAME_2}" ]; then
+    echo "  Camera name 2: ${CAMERA_NAME_2}"
+fi
+echo "  Scene zip:   ${SCENE_ZIP}"
+echo "  Video file:  ${VIDEO_FILE}"
+if [ -n "${VIDEO_FILE_2}" ]; then
+    echo "  Video file 2: ${VIDEO_FILE_2}"
+fi
+echo "  Models:      ${MODELS}"
 
 if [ -z "${SCENE_NAME}" ] || [ -z "${CAMERA_NAME}" ]; then
-    echo -e "${RED}ERROR: zone_config.json must have scene_name and camera_name${NC}"
+    echo -e "${RED}ERROR: zone_config.json must have scene_name and cameras[0].name${NC}"
     exit 1
 fi
 
-# Validate base scene zip exists
-BASE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP_BASE}"
-if [ ! -f "${BASE_ZIP_PATH}" ]; then
-    echo -e "${YELLOW}WARNING: Base scene zip not found at ${BASE_ZIP_PATH}${NC}"
+# Validate scene zip exists
+SCENE_ZIP_PATH="${SCENESCAPE_DIR}/webserver/${SCENE_ZIP}"
+if [ -n "${SCENE_ZIP}" ] && [ ! -f "${SCENE_ZIP_PATH}" ]; then
+    echo -e "${YELLOW}WARNING: Scene zip not found at ${SCENE_ZIP_PATH}${NC}"
     echo "  Scene import will be skipped. Import manually via SceneScape UI."
 fi
 
@@ -108,130 +156,64 @@ if [ ! -f "${VIDEO_PATH}" ]; then
     echo "  Place your video file in scenescape/sample_data/"
 fi
 
-SCENE_ZIP="${SCENE_ZIP_BASE}"
-
-# ---- Source AI-model settings from configs/.env.example (single source of truth) ----
-# User edits DETECT_MODEL / REID_MODEL / DETECT_DEVICE / REID_DEVICE /
-# VLM_MODEL_NAME / VLM_PRECISION / TARGET_DEVICE / YOLO_MODEL_NAME there;
-# init.sh propagates them into docker/.env.
-# Only AI-model keys are pulled — placeholders like SUPASS=<auto-generated>
-# in .env.example are intentionally NOT sourced.
-ENV_EXAMPLE="${APP_DIR}/configs/.env.example"
-AI_KEYS_REGEX='^(VLM_ENABLED|VLM_MODEL_NAME|VLM_PRECISION|TARGET_DEVICE|YOLO_MODEL_NAME|DETECT_MODEL|REID_MODEL|MODEL_PRECISION|SCENESCAPE_VERSION|SCENESCAPE_REGISTRY|DLSTREAMER_VERSION|OVMS_IMAGE_TAG|RESULTS_PATH)='
-if [ -f "${ENV_EXAMPLE}" ]; then
-    AI_ENV_TMP="$(mktemp)"
-    grep -E "${AI_KEYS_REGEX}" "${ENV_EXAMPLE}" > "${AI_ENV_TMP}" || true
-    set -a
-    # shellcheck disable=SC1090
-    . "${AI_ENV_TMP}"
-    set +a
-    rm -f "${AI_ENV_TMP}"
-    echo "  Loaded AI-model settings from ${ENV_EXAMPLE}"
+if [ -n "${VIDEO_FILE_2}" ]; then
+    VIDEO_PATH_2="${SAMPLE_DATA_DIR}/${VIDEO_FILE_2}"
+    if [ ! -f "${VIDEO_PATH_2}" ]; then
+        echo -e "${YELLOW}WARNING: Video 2 not found at ${VIDEO_PATH_2}${NC}"
+        echo "  Place your video file in scenescape/sample_data/"
+    fi
 fi
 
-# ---- Step 3: Generate DLStreamer config + camera streams ----
-echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline config + camera streams...${NC}"
+# ---- Step 3: Generate DLStreamer config.json (per camera) ----
+echo -e "${YELLOW}[3/4] Generating DLStreamer pipeline configs...${NC}"
 
-# Source device resource config (all-gpu.env or all-cpu.env)
-# User can pass RESOURCE_CONFIG=configs/res/all-gpu.env (default) or all-cpu.env
-RESOURCE_CONFIG="${RESOURCE_CONFIG:-configs/res/all-gpu-cpu.env}"
-RESOURCE_CONFIG_PATH="${APP_DIR}/${RESOURCE_CONFIG}"
-if [ -f "${RESOURCE_CONFIG_PATH}" ]; then
-    echo "  Loading resource config: ${RESOURCE_CONFIG}"
-    set -a
-    # shellcheck disable=SC1090
-    . "${RESOURCE_CONFIG_PATH}"
-    set +a
-else
-    echo -e "${YELLOW}WARNING: Resource config not found at ${RESOURCE_CONFIG_PATH}, using defaults${NC}"
-fi
-
-DETECT_DEVICE="${DETECT_DEVICE:-GPU}"
-REID_DEVICE="${REID_DEVICE:-CPU}"
-DETECT_MODEL="${DETECT_MODEL:-yolo11s}"
-REID_MODEL="${REID_MODEL:-person-reidentification-retail-0277}"
-
-# Auto-derive model-proc and labels: YOLO models need both, OpenVINO models skip labels
-if [[ "${DETECT_MODEL}" == yolo* ]]; then
-    DETECT_MODEL_PROC="${DETECT_MODEL_PROC:-yolo-v8.json}"
-    DETECT_LABELS="labels-file=/home/pipeline-server/models/detect/${DETECT_MODEL}/labels.txt"
-else
-    DETECT_MODEL_PROC="${DETECT_MODEL_PROC:-${DETECT_MODEL}.json}"
-    DETECT_LABELS=""
-fi
-MODEL_PRECISION="${MODEL_PRECISION:-FP32}"
-
-# Defaults for pipeline element variables (if not set by resource config)
-DECODE="${DECODE:-rtph264depay ! h264parse ! vah264dec ! vapostproc ! video/x-raw(memory:VAMemory)}"
-PRE_PROCESS="${PRE_PROCESS:-pre-process-backend=va-surface-sharing}"
-DETECTION_OPTIONS="${DETECTION_OPTIONS:-ie-config=GPU_THROUGHPUT_STREAMS=2 nireq=2}"
-REID_PRE_PROCESS="${REID_PRE_PROCESS:-pre-process-backend=opencv}"
-REID_OPTIONS="${REID_OPTIONS:-nireq=2}"
-POST_DETECT="${POST_DETECT:-}"
-POST_INFERENCE="${POST_INFERENCE:-}"
-
-# Use single unified pipeline template
 DLSTREAMER_TEMPLATE="${APP_DIR}/configs/pipeline-config.json"
 if [ ! -f "${DLSTREAMER_TEMPLATE}" ]; then
     echo -e "${RED}ERROR: DLStreamer template not found at ${DLSTREAMER_TEMPLATE}${NC}"
     exit 1
 fi
 
-echo "  Resource config: ${RESOURCE_CONFIG}"
-echo "  Detect: ${DETECT_MODEL} on ${DETECT_DEVICE}  ReID: ${REID_MODEL} on ${REID_DEVICE}"
-
-# Build !-delimited element chains; insert leading " ! " only when non-empty
-POST_DETECT_CHAIN=""
-if [ -n "${POST_DETECT}" ]; then
-    POST_DETECT_CHAIN="! ${POST_DETECT}"
+# Validate app-specific controller configs exist
+if [ ! -f "${APP_DIR}/configs/tracker-config.json" ]; then
+    echo -e "${YELLOW}WARNING: tracker-config.json not found in ${APP_DIR}/configs/${NC}"
+    echo "  SceneScape will use default from scenescape/controller/tracker-config.json"
 fi
-POST_INFERENCE_CHAIN=""
-if [ -n "${POST_INFERENCE}" ]; then
-    POST_INFERENCE_CHAIN="! ${POST_INFERENCE}"
+if [ ! -f "${APP_DIR}/configs/reid-config.json" ]; then
+    echo -e "${YELLOW}WARNING: reid-config.json not found in ${APP_DIR}/configs/${NC}"
+    echo "  SceneScape will use default from scenescape/controller/reid-config.json"
 fi
 
-# Use sed delimiter that won't collide with pipeline characters
-sed -e "s|{{CAMERA_NAME}}|${CAMERA_NAME}|g" \
-    -e "s|{{DETECT_MODEL_PROC}}|${DETECT_MODEL_PROC}|g" \
-    -e "s|{{DETECT_LABELS}}|${DETECT_LABELS}|g" \
-    -e "s|{{DETECT_MODEL}}|${DETECT_MODEL}|g" \
-    -e "s|{{DETECT_DEVICE}}|${DETECT_DEVICE}|g" \
-    -e "s|{{REID_MODEL}}|${REID_MODEL}|g" \
-    -e "s|{{REID_DEVICE}}|${REID_DEVICE}|g" \
-    -e "s|{{MODEL_PRECISION}}|${MODEL_PRECISION}|g" \
-    -e "s|{{DECODE}}|${DECODE}|g" \
-    -e "s|{{PRE_PROCESS}}|${PRE_PROCESS}|g" \
-    -e "s|{{DETECTION_OPTIONS}}|${DETECTION_OPTIONS}|g" \
-    -e "s|{{REID_PRE_PROCESS}}|${REID_PRE_PROCESS}|g" \
-    -e "s|{{REID_OPTIONS}}|${REID_OPTIONS}|g" \
-    -e "s|{{POST_DETECT}}|${POST_DETECT_CHAIN}|g" \
-    -e "s|{{POST_INFERENCE}}|${POST_INFERENCE_CHAIN}|g" \
-    -e "s|{{QUEUE_OPTIONS}}|${QUEUE_OPTIONS}|g" \
-    -e "s|{{DETECT_THRESHOLD}}|${DETECT_THRESHOLD:-0.5}|g" \
-    -e "s|{{INFERENCE_INTERVAL}}|${INFERENCE_INTERVAL:-3}|g" \
-    "${DLSTREAMER_TEMPLATE}" > "${DLSTREAMER_CONFIG}"
-echo "  Generated ${DLSTREAMER_CONFIG}"
-echo "  Using pre-existing ${APP_DIR}/docker/docker-compose.cameras.yaml"
+# Resolve controller config paths (app-specific or SceneScape default)
+if [ -f "${APP_DIR}/configs/tracker-config.json" ]; then
+    TRACKER_CONFIG="${APP_DIR}/configs/tracker-config.json"
+else
+    TRACKER_CONFIG="${SCENESCAPE_DIR}/controller/tracker-config.json"
+fi
+if [ -f "${APP_DIR}/configs/reid-config.json" ]; then
+    REID_CONFIG="${APP_DIR}/configs/reid-config.json"
+else
+    REID_CONFIG="${SCENESCAPE_DIR}/controller/reid-config.json"
+fi
 
-# Copy stream_density.py to webserver dir for scene-import container (if available)
-STREAM_DENSITY_SCRIPT="${APP_DIR}/stream_density.py"
-if [ -f "${STREAM_DENSITY_SCRIPT}" ]; then
-    cp "${STREAM_DENSITY_SCRIPT}" "${SCENESCAPE_DIR}/webserver/stream_density.py"
+DLSTREAMER_OUTPUT_DIR="${SCENESCAPE_DIR}/dlstreamer-pipeline-server"
+
+# Camera 1 — always generated
+PIPELINE_CONFIG_1="${DLSTREAMER_OUTPUT_DIR}/${APP_NAME}-${CAMERA_NAME}-pipeline-config.json"
+sed "s/{{CAMERA_NAME}}/${CAMERA_NAME}/g" "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_1}"
+echo "  Camera 1: ${PIPELINE_CONFIG_1}"
+echo "    Pipeline: reid_${CAMERA_NAME}  cameraid: ${CAMERA_NAME}"
+
+# Camera 2 — generated only if defined in zone_config.json
+PIPELINE_CONFIG_2=""
+if [ -n "${CAMERA_NAME_2}" ]; then
+    PIPELINE_CONFIG_2="${DLSTREAMER_OUTPUT_DIR}/${APP_NAME}-${CAMERA_NAME_2}-pipeline-config.json"
+    sed "s/{{CAMERA_NAME}}/${CAMERA_NAME_2}/g" "${DLSTREAMER_TEMPLATE}" > "${PIPELINE_CONFIG_2}"
+    echo "  Camera 2: ${PIPELINE_CONFIG_2}"
+    echo "    Pipeline: reid_${CAMERA_NAME_2}  cameraid: ${CAMERA_NAME_2}"
 fi
 
 # ---- Step 4: Generate .env file ----
 echo -e "${YELLOW}[4/4] Generating docker/.env...${NC}"
-
-VLM_ENABLED="${VLM_ENABLED:-true}"
-VLM_MODEL_NAME="${VLM_MODEL_NAME:-Qwen/Qwen2.5-VL-7B-Instruct}"
-VLM_PRECISION="${VLM_PRECISION:-int8}"
-TARGET_DEVICE="${TARGET_DEVICE:-GPU}"
-YOLO_MODEL_NAME="${YOLO_MODEL_NAME:-yolo26n-pose}"
-SCENESCAPE_REGISTRY="${SCENESCAPE_REGISTRY:-}"
-SCENESCAPE_VERSION="${SCENESCAPE_VERSION:-v2026.0.0}"
-DLSTREAMER_VERSION="${DLSTREAMER_VERSION:-2026.1.0-20260331-weekly-ubuntu24}"
-OVMS_IMAGE_TAG="${OVMS_IMAGE_TAG:-2026.1-gpu}"
-RESULTS_PATH="${RESULTS_PATH:-./results}"
 
 # Read generated secrets — honor SUPASS from environment if set
 SUPASS="${SUPASS:-$(cat "${SECRETS_DIR}/supass" 2>/dev/null || echo "")}"
@@ -247,13 +229,19 @@ if [ "${SECRETS_GENERATED}" = "1" ]; then
     docker volume rm storewide-lp_vol-db storewide-lp_vol-migrations 2>/dev/null || true
 fi
 
+mkdir -p "$(dirname "${ENV_FILE}")"
+
 if [ -f "${ENV_FILE}" ]; then
     echo "  ${ENV_FILE} already exists. Backing up to ${ENV_FILE}.bak"
     cp "${ENV_FILE}" "${ENV_FILE}.bak"
 fi
 
 cat > "${ENV_FILE}" <<EOF
-# Auto-generated by init.sh — $(date -Iseconds)
+# Auto-generated by init.sh from ${APP_DIR}/configs/zone_config.json
+# Regenerate: make init  (or ../scenescape/scripts/init.sh ${APP_DIR})
+# Generated: $(date -Iseconds)
+
+# ---- Secrets (auto-generated) ----
 SECRETSDIR=${SECRETS_DIR}
 SUPASS=${SUPASS}
 DATABASE_PASSWORD=${DBPASS}
@@ -261,52 +249,58 @@ CONTROLLER_AUTH=${CONTROLLER_AUTH}
 UID=${USER_UID}
 GID=${USER_GID}
 
-# Scene (auto-populated from zone_config.json by init.sh)
+# ---- Scene (from zone_config.json) ----
 SCENE_NAME=${SCENE_NAME}
 CAMERA_NAME=${CAMERA_NAME}
+CAMERA_NAME_2=${CAMERA_NAME_2}
 SCENE_ZIP=${SCENE_ZIP}
 VIDEO_FILE=${VIDEO_FILE}
-STREAM_DENSITY=${STREAM_DENSITY}
+VIDEO_FILE_2=${VIDEO_FILE_2}
 
-# DLStreamer pipeline config (app-specific, generated by init.sh)
-PIPELINE_CONFIG=../scenescape/dlstreamer-pipeline-server/${APP_NAME}-pipeline-config.json
+# ---- DLStreamer pipeline config (generated per camera) ----
+PIPELINE_CONFIG=${PIPELINE_CONFIG_1}
+PIPELINE_CONFIG_2=${PIPELINE_CONFIG_2}
 
-# OpenVINO Models (comma-separated)
-MODELS=${DETECT_MODEL},${REID_MODEL}
+# ---- Controller configs (from app configs/) ----
+TRACKER_CONFIG=${TRACKER_CONFIG}
+REID_CONFIG=${REID_CONFIG}
+
+# ---- OpenVINO Models (from zone_config.json) ----
+MODELS=${MODELS}
 MODEL_PRECISION=${MODEL_PRECISION}
 
-# SceneScape image versions
+# ---- SceneScape images (from zone_config.json) ----
 SCENESCAPE_REGISTRY=${SCENESCAPE_REGISTRY}
 SCENESCAPE_VERSION=${SCENESCAPE_VERSION}
+SCENESCAPE_CONTROLLER_IMAGE=${SCENESCAPE_CONTROLLER_IMAGE}
+SCENESCAPE_MANAGER_IMAGE=${SCENESCAPE_MANAGER_IMAGE}
 DLSTREAMER_VERSION=${DLSTREAMER_VERSION}
-OVMS_IMAGE_TAG=${OVMS_IMAGE_TAG}
 
-# Store
-STORE_NAME=Retail
-STORE_ID=store_001
+# ---- Store (from zone_config.json) ----
+STORE_NAME=${STORE_NAME}
+STORE_ID=${STORE_ID}
 
-# LP
-LP_SERVICE_PORT=8082
-LOG_LEVEL=INFO
+# ---- Services (from zone_config.json) ----
+LP_SERVICE_PORT=${LP_SERVICE_PORT}
+LOG_LEVEL=${LOG_LEVEL}
 
-# SeaweedFS
-SEAWEEDFS_S3_PORT=8333
-SEAWEEDFS_MASTER_PORT=9333
-SEAWEEDFS_VOLUME_PORT=8080
+# ---- SeaweedFS (from zone_config.json) ----
+SEAWEEDFS_S3_PORT=${SEAWEEDFS_S3_PORT}
+SEAWEEDFS_MASTER_PORT=${SEAWEEDFS_MASTER_PORT}
+SEAWEEDFS_VOLUME_PORT=${SEAWEEDFS_VOLUME_PORT}
 
-# SceneScape API (for zone auto-discovery)
-SCENESCAPE_API_USER=admin
+# ---- SceneScape API (from zone_config.json) ----
+SCENESCAPE_API_USER=${SCENESCAPE_API_USER}
 SCENESCAPE_API_PASSWORD=${SUPASS}
 
-# AI Models (sourced from configs/.env.example)
-VLM_ENABLED=${VLM_ENABLED}
-VLM_MODEL_NAME=${VLM_MODEL_NAME}
-VLM_SOURCE_MODEL=${VLM_SOURCE_MODEL}
-VLM_PRECISION=${VLM_PRECISION}
-TARGET_DEVICE=${TARGET_DEVICE}
-YOLO_MODEL_NAME=${YOLO_MODEL_NAME}
-
-# Performance metrics results path
+# ---- Benchmark (from zone_config.json) ----
+BENCHMARK_TARGET_LATENCY_MS=${BENCHMARK_TARGET_LATENCY_MS}
+BENCHMARK_LATENCY_METRIC=${BENCHMARK_LATENCY_METRIC}
+BENCHMARK_SCENE_INCREMENT=${BENCHMARK_SCENE_INCREMENT}
+BENCHMARK_INIT_DURATION=${BENCHMARK_INIT_DURATION}
+BENCHMARK_STABILISE_DURATION=${BENCHMARK_STABILISE_DURATION}
+BENCHMARK_MAX_ITERATIONS=${BENCHMARK_MAX_ITERATIONS}
+BENCHMARK_MIN_THROUGHPUT_RATIO=${BENCHMARK_MIN_THROUGHPUT_RATIO}
 RESULTS_PATH=${RESULTS_PATH}
 EOF
 
@@ -314,16 +308,22 @@ echo ""
 echo -e "${GREEN}=== Init complete ===${NC}"
 echo ""
 echo "Generated files:"
-echo "  Secrets:          ${SECRETS_DIR}/"
-echo "  DLStreamer config: ${DLSTREAMER_CONFIG}"
-echo "  Env:              ${ENV_FILE}"
+echo "  Secrets:              ${SECRETS_DIR}/"
+echo "  Pipeline config (1):  ${PIPELINE_CONFIG_1}"
+if [ -n "${PIPELINE_CONFIG_2}" ]; then
+echo "  Pipeline config (2):  ${PIPELINE_CONFIG_2}"
+fi
+echo "  Tracker config:       ${TRACKER_CONFIG}"
+echo "  Reid config:          ${REID_CONFIG}"
+echo "  Env:                  ${ENV_FILE}"
+echo ""
+echo "All values sourced from: ${ZONE_CONFIG}"
 echo ""
 echo "Scene: ${SCENE_NAME}"
 echo "  Camera: ${CAMERA_NAME}  Video: ${VIDEO_FILE}  Zip: ${SCENE_ZIP}"
-echo "  Stream density: ${STREAM_DENSITY}"
 echo -e "  SUPASS: ${YELLOW}${SUPASS}${NC}"
 echo ""
-echo "To change scene/camera: edit configs/zone_config.json, then re-run init.sh"
+echo "To change any setting: edit configs/zone_config.json, then re-run init.sh"
 echo ""
 echo "Next steps:"
 echo "  1. Place your video in scenescape/sample_data/${VIDEO_FILE}"

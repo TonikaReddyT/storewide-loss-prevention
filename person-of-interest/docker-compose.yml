@@ -1,0 +1,101 @@
+services:
+  # ── POI Backend ────────────────────────────────────────
+  poi-backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: poi-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - REDIS_HOST=redis
+      - PYTHONPATH=/app
+      - ALERT_SERVICE_URL=http://poi-alert-service:8000
+      - DELIVERY_HANDLERS=log,alert_service
+      - ALERT_DEDUP_TTL=60
+      - RTSP_BASE_URL=rtsp://mediaserver:8554
+      - RTSP_PREWARM_CAMERAS=Camera_01,Camera_02
+      - MQTT_IMAGE_CAMERAS=Camera_01,Camera_02
+      - SIMILARITY_THRESHOLD=${SIMILARITY_THRESHOLD:-0.50}
+      - SEARCH_SIMILARITY_THRESHOLD=${SEARCH_SIMILARITY_THRESHOLD:-0.65}
+      - OBJECT_CACHE_TTL=5
+      - ENROLL_FACE_PADDING=0.0
+      - ENROLL_FACE_SQUARE=false
+      - ENROLL_EMBEDDING_STRATEGY=mean
+    volumes:
+      - faiss-data:/data/faiss
+      - ./data/uploads:/data/uploads
+      - ./models/intel/intel:/models/intel:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - poi-net
+      - storewide-lp
+
+  # ── UI ─────────────────────────────────────────────────
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    container_name: poi-ui
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - poi-backend
+    networks:
+      - poi-net
+
+  # ── Redis ──────────────────────────────────────────────
+  redis:
+    image: redis:8.6.2
+    container_name: poi-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - poi-net
+
+  # ── Alert Service ──────────────────────────────────────
+  poi-alert-service:
+    image: intel/alert-service:0.0.1
+    container_name: poi-alert-service
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - MQTT_HOST=${MQTT_HOST:-localhost}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - DELIVERY_HANDLERS=log,websocket
+    volumes:
+      - ./configs/alert-service-config.yaml:/app/config/config.yaml:ro
+      - ./configs/alert-service-overrides/ws_manager.py:/app/src/delivery/ws_manager.py:ro
+      - ./configs/alert-service-overrides/alerts.py:/app/src/api/endpoints/alerts.py:ro
+    networks:
+      - poi-net
+      - storewide-lp
+
+volumes:
+  redis-data:
+  faiss-data:
+
+networks:
+  poi-net:
+    driver: bridge
+  storewide-lp:
+    external: true

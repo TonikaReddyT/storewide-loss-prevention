@@ -1,0 +1,21 @@
+service:
+  retry_attempts: 3
+  retry_interval_seconds: 5
+
+subscriptions:
+  - alert_type: POI_MATCH
+    dedup:
+      enabled: true
+      strategy: field_hash
+      fields:
+        - metadata.poi_id
+        - metadata.camera_id
+      window_seconds: 60
+      on_missing: skip
+      hash:
+        algorithm: sha1
+        truncate: 16
+
+    delivery:
+      - type: log
+      - type: websocket
