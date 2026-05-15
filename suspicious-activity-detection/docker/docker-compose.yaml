@@ -18,6 +18,14 @@ services:
         condition: service_healthy
         required: false
 
+  # ---------- Disable camera-2 services (not needed for suspicious-activity) ----------
+  lp-cams-2:
+    profiles:
+      - camera2
+  lp-video-2:
+    profiles:
+      - camera2
+
   # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:
     build:

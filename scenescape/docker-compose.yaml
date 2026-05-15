@@ -197,6 +197,8 @@ services:
         condition: service_started
       ntpserv:
         condition: service_started
+      scene-import:
+        condition: service_completed_successfully
     environment:
       CONTROLLER_ENABLE_METRICS: "false"
       CONTROLLER_METRICS_ENDPOINT: ""
