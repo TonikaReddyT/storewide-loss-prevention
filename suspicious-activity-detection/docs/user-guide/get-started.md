@@ -41,6 +41,10 @@ Before starting, ensure these files are in place:
 | `../scenescape/webserver/storewide-loss-prevention.zip` | Scene map + zone definitions imported into SceneScape |
 | `../scenescape/sample_data/lp-camera1.mp4` | Sample video used by the camera replay |
 
+> **Note:** The video file name must match the camera name defined in the
+> SceneScape scene (for example, `lp-camera1.mp4` corresponds to camera
+> `lp-camera1`).
+
 ## 4. Download AI Models
 
 The first run requires downloading the OpenVINO and VLM models:
@@ -94,6 +98,25 @@ chain, inference device, pre-process backend, and throughput options. A single
 unified pipeline template (`configs/pipeline-config.json`) is rendered at
 init time using the selected profile.
 
+### Disable the Gradio UI
+
+The Gradio dashboard (`swlp-suscpicious-ui`) is enabled by default. To run
+the stack **without** the UI container (for example, headless deployments or
+resource-constrained systems), pass `ENABLE_UI=false`:
+
+```bash
+# Start without the Gradio UI
+make up ENABLE_UI=false
+
+# Start with the UI (default)
+make up ENABLE_UI=true
+```
+
+When the UI is disabled, the `swlp-suscpicious-ui` container is not built or
+started, and the Gradio dashboard at `http://localhost:7860` is unavailable.
+All other services (SceneScape, swlp-service, Behavioral Analysis, OVMS, etc.)
+continue to run normally.
+
 `make up` performs the following steps automatically:
 
 1. Sources the selected device resource config (`configs/res/<DEVICE>`).
@@ -104,10 +127,15 @@ init time using the selected profile.
 6. Builds the LP, Behavioral Analysis, and Gradio UI container images.
 7. Starts all SceneScape and LP containers.
 8. Imports the scene map into SceneScape.
-9. Tails LP logs to `application.log`.
 
 
-## 6. Stop Services
+## 6. View Logs
+
+```bash
+make logs
+```
+
+## 7. Stop Services
 
 ```bash
 # Stop everything
@@ -115,7 +143,7 @@ make down
 
 ```
 
-## 7. Access the UI
+## 8. Access the UI
 
 Once running:
 
@@ -124,12 +152,12 @@ Once running:
 | SceneScape UI | https://localhost | `admin` / password printed by `make up` |
 | Gradio Dashboard | http://localhost:7860 | — |
 | LP REST API | http://localhost:8082 | — |
-| LP logs | `application.log` | `tail -f application.log` |
+| LP logs | `make logs` | View all service logs |
 
 From the Gradio dashboard you can observe live alerts, evidence frames, and
 session state across all configured cameras.
 
-## 8. Inspect Alerts and Sessions via REST
+## 9. Inspect Alerts and Sessions via REST
 
 ```bash
 # Health check
@@ -145,7 +173,7 @@ curl http://localhost:8082/api/v1/lp/sessions
 curl http://localhost:8082/api/v1/lp/status
 ```
 
-## 9. Tune Detection Behavior
+## 10. Tune Detection Behavior
 
 Detection thresholds, dedup scope, and severity escalation are defined
 declaratively in `configs/rules.yaml`. Edit the file and restart the

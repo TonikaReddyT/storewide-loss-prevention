@@ -7,7 +7,7 @@
 # No SceneScape source checkout required.
 # SceneScape-specific targets are in scenescape/Makefile.
 
-TAG ?= 0.0.1
+TAG ?= 2026.1.0-rc1
 REGISTRY ?= true
 
 SCENESCAPE_DIR := ../scenescape
@@ -18,6 +18,15 @@ COMPOSE_ALL := docker compose --project-directory . --env-file docker/.env -f $(
 CAMERAS_OVERRIDE := docker/docker-compose.cameras.yaml
 COMPOSE_ALL := $(if $(wildcard $(CAMERAS_OVERRIDE)),$(COMPOSE_ALL) -f $(CAMERAS_OVERRIDE),$(COMPOSE_ALL))
 
+# Enable Gradio UI (set to false to skip)
+ENABLE_UI ?= true
+
+# Conditionally enable the Gradio UI profile
+ENABLE_UI_LOWER := $(shell echo $(ENABLE_UI) | tr A-Z a-z)
+ifeq ($(ENABLE_UI_LOWER),true)
+  COMPOSE_ALL := $(COMPOSE_ALL) --profile ui
+endif
+
 RESULTS_PATH ?= ./results
 
 export TAG
@@ -27,11 +36,29 @@ REGISTRY_URL = intel/
 REGISTRY_LOWER := $(shell echo $(REGISTRY) | tr A-Z a-z)
 
 # Auto-shutdown timeout in minutes (0 = disabled)
-AUTO_STOP_MINUTES ?= 20
+AUTO_STOP_MINUTES ?= 15
 
 # Device resource config: pass DEVICE=all-gpu-cpu.env (default), all-gpu.env, or all-cpu.env
 DEVICE ?= all-gpu-cpu.env
 RESOURCE_CONFIG := configs/res/$(DEVICE)
+
+
+# ---- Submodules ----
+
+.PHONY: update-submodules
+update-submodules:
+	@echo "Cloning performance tool repositories"
+	cd .. && git submodule deinit -f .
+	cd .. && git submodule update --init --remote --recursive
+	@echo "Submodules updated (if any present)."
+
+# ---- Models ----
+
+.PHONY: download-models
+download-models:
+	@echo "Downloading models for Suspicious Activity Detection..."
+	bash download_models/model_download.sh
+
 
 # ---- Initialization ----
 
@@ -42,19 +69,22 @@ init:
 # ---- Full Stack (SceneScape + LP) ----
 
 .PHONY: up
+
 up:
 	@$(MAKE) -C $(SCENESCAPE_DIR) APP_DIR=$(CURDIR) RESOURCE_CONFIG=$(RESOURCE_CONFIG) init init-sample-data download-models init-volumes
 	@$(MAKE) patch-device
 	@mkdir -p $(RESULTS_PATH) $(RESULTS_PATH)/ba $(RESULTS_PATH)/swlp
-ifeq ($(REGISTRY_LOWER),true)
-	@echo ""
-	@echo "=== Pulling LP images from $(REGISTRY_URL) ==="
-	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
-else
-	@echo ""
-	@echo "=== Building LP images ==="
-	$(COMPOSE_ALL) build swlp-service behavioral-analysis swlp-suscpicious-ui
-endif
+	@if [ "$(REGISTRY)" = "true" ]; then \
+		echo "Pulling LP images from $(REGISTRY_URL)..."; \
+		DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull; \
+	else \
+		echo "Building LP images..."; \
+		BUILD_SERVICES="swlp-service behavioral-analysis"; \
+		if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
+			BUILD_SERVICES="$$BUILD_SERVICES swlp-suscpicious-ui"; \
+		fi; \
+		$(COMPOSE_ALL) build $$BUILD_SERVICES; \
+	fi
 	@echo ""
 	@echo "=== Starting all services ==="
 	$(COMPOSE_ALL) up -d
@@ -64,10 +94,11 @@ endif
 	@echo "Services running:"
 	@echo "  SceneScape UI:   https://localhost"
 	@echo "  Login:           admin / $$(grep SUPASS docker/.env | cut -d= -f2-)"
-	@echo "  Gradio UI:       http://localhost:7860"
-	@echo "  LP API:          http://localhost:8082"
-	@echo "  Alert Service:   http://localhost:8000"
-	@echo "  LP logs:         application.log"
+	@if [ "$(ENABLE_UI_LOWER)" = "true" ]; then \
+		echo "  Gradio UI:       http://localhost:7860"; \
+	else \
+		echo "  Gradio UI:       DISABLED (ENABLE_UI=false)"; \
+	fi
 	@echo ""
 	@echo "To stop: make down"
 	@if [ -f /tmp/swlp-auto-stop.pid ]; then \
@@ -83,9 +114,8 @@ endif
 
 .PHONY: down
 down:
-	-$(COMPOSE_ALL) down  --remove-orphans
+	-$(COMPOSE_ALL) --profile ui down  --remove-orphans
 	-docker volume rm storewide-lp_seaweedfs-data 2>/dev/null || true
-	@rm -f application.log
 
 # Wipes the corrupt VDMS reid_vector descriptor set + graph metadata that
 # SceneScape's first-init creates without dimensions, then bounces the
@@ -128,8 +158,8 @@ status:
 
 # ---- LP-Only (SceneScape must be running separately) ----
 
-.PHONY: demo-lp
-demo-lp:
+.PHONY: run-lp
+run-lp:
 ifeq ($(REGISTRY_LOWER),true)
 	@echo "Pulling LP images from $(REGISTRY_URL)..."
 	DOCKER_REGISTRY=$(REGISTRY_URL) $(COMPOSE_ALL) pull swlp-service behavioral-analysis swlp-suscpicious-ui
@@ -144,21 +174,7 @@ endif
 down-lp:
 	$(COMPOSE_LP) down
 
-# ---- Submodules ----
 
-.PHONY: update-submodules
-update-submodules:
-	@echo "Cloning performance tool repositories"
-	cd .. && git submodule deinit -f .
-	cd .. && git submodule update --init --remote --recursive
-	@echo "Submodules updated (if any present)."
-
-# ---- Models ----
-
-.PHONY: download-models
-download-models:
-	@echo "Downloading models for Suspicious Activity Detection..."
-	bash download_models/model_download.sh
 
 # Patch graph.pbtxt device to match TARGET_DEVICE from configs/.env.example
 .PHONY: patch-device
@@ -183,8 +199,8 @@ PERF_TOOLS_DOCKER_DIR := ../performance-tools/docker
 SWLP_STREAM_DENSITY := $(PERF_TOOLS_DIR)/swlp_stream_density.py
 
 # Benchmark image configuration
-BENCHMARK_IMAGE ?= swlp-benchmark:latest
-REGISTRY_BENCHMARK ?= intel/swlp-benchmark:$(TAG)
+BENCHMARK_IMAGE ?= retail-benchmark:latest
+REGISTRY_BENCHMARK ?= intel/retail-benchmark:$(TAG)
 
 .PHONY: fetch-benchmark
 fetch-benchmark: ## Pull benchmark image from registry
@@ -232,7 +248,8 @@ BENCHMARK_VENV := cd $(PERF_TOOLS_DIR) && \
 	export PYTHONPATH=$(PERF_TOOLS_DIR):$$PYTHONPATH
 
 .PHONY: benchmark
-benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure latency)
+benchmark: ## Run a single-scene benchmark (1 scene, measure latency)
+	@$(MAKE) up ENABLE_UI=false
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Benchmark — Single Scene                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -252,7 +269,8 @@ benchmark: build-benchmark up ## Run a single-scene benchmark (1 scene, measure 
 	rc=$$?; $(MAKE) down; exit $$rc
 
 .PHONY: benchmark-stream-density
-benchmark-stream-density: build-benchmark up ## Iteratively increase scenes until latency threshold is reached
+benchmark-stream-density: ## Iteratively increase scenes until latency threshold is reached
+	@$(MAKE) up ENABLE_UI=false
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║       SWLP Stream Density — Scene-Based Latency Scaling         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -315,6 +333,12 @@ down-stream-density:
 .PHONY: build
 build:
 	$(COMPOSE_SCENESCAPE) build
+
+.PHONY: build-lp
+build-lp: ## Build LP container images (swlp-service, behavioral-analysis, swlp-suscpicious-ui)
+	docker build -t intel/swlp-behavioral-analysis:$(TAG) -f behavioral-analysis/Dockerfile behavioral-analysis/
+	docker build -t intel/swlp-service:$(TAG) -f swlp-service/Dockerfile .
+	docker build -t intel/swlp-suscpicious-ui:$(TAG) -f ui/Dockerfile ui/
 
 # ---- Cleanup ----
 

@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # latency grow without bound. 1–2 keeps OVMS responsive on a single
     # GPU.
     vlm_max_concurrency: int = 1
-    vlm_max_tokens: int = 100
+    vlm_max_tokens: int = 50
     vlm_temperature: float = 0.1
     vlm_max_image_size: int = 256
 
@@ -79,3 +79,36 @@ def load_pattern_config(path: str) -> dict[str, Any]:
     enabled = {k: v for k, v in patterns.items() if v.get("enabled", True)}
     logger.info(f"Loaded {len(enabled)} enabled patterns from {path}")
     return patterns
+
+
+def apply_vlm_settings(settings: Settings, path: str) -> None:
+    """Override VLM settings from the patterns YAML if present."""
+    config_path = Path(path)
+    if not config_path.exists():
+        return
+
+    with open(config_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    vlm = config.get("vlm_settings")
+    if not vlm:
+        return
+
+    field_map = {
+        "endpoint": "vlm_endpoint",
+        "model_name": "vlm_model_name",
+        "enabled": "vlm_enabled",
+        "timeout": "vlm_timeout",
+        "max_tokens": "vlm_max_tokens",
+        "temperature": "vlm_temperature",
+        "max_image_size": "vlm_max_image_size",
+        "max_concurrency": "vlm_max_concurrency",
+    }
+    applied = []
+    for yaml_key, settings_attr in field_map.items():
+        if yaml_key in vlm:
+            setattr(settings, settings_attr, vlm[yaml_key])
+            applied.append(f"{yaml_key}={vlm[yaml_key]}")
+
+    if applied:
+        logger.info(f"VLM settings from config: {', '.join(applied)}")

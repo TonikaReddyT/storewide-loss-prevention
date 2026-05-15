@@ -2,3 +2,6 @@ exit-code: 1
 severity:
   - HIGH
   - CRITICAL
+scanners:
+  - vuln
+  - secret

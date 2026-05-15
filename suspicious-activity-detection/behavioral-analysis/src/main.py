@@ -20,7 +20,7 @@ from pose_analyzer import PoseAnalyzer, PatternResult
 from seaweedfs_client import SeaweedFSClient
 from vlm_client import VLMClient
 from ba_queue import BAQueueConsumer
-from config import Settings, load_pattern_config
+from config import Settings, load_pattern_config, apply_vlm_settings
 from yolo_pipeline import extract_poses
 
 logging.basicConfig(level=logging.INFO)
@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI):
 
     # Load pattern config
     pattern_config = load_pattern_config(settings.pattern_config_path)
+
+    # Apply VLM settings from config YAML (overrides env/defaults)
+    apply_vlm_settings(settings, settings.pattern_config_path)
 
     # Initialize VLM client (if enabled)
     vlm_client = None

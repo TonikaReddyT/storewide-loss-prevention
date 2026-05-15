@@ -2,11 +2,21 @@
 # SPDX-License-Identifier: Apache-2.0
 
 services:
-  # ---------- DLStreamer override: app-specific model mounts ----------
+  # ---------- DLStreamer override: app-specific model mounts + startup ordering ----------
   lp-video:
+    depends_on:
+      swlp-suscpicious-ui:
+        condition: service_healthy
+        required: false
     volumes:
       - ${MODEL_PATH:-./models}/detect_models:/home/pipeline-server/models/detect:ro
       - ${MODEL_PATH:-./models}/reid_models:/home/pipeline-server/models/reid:ro
+
+  lp-cams:
+    depends_on:
+      swlp-suscpicious-ui:
+        condition: service_healthy
+        required: false
 
   # ---------- Behavioral Analysis (YOLO Pose + VLM) ----------
   behavioral-analysis:
@@ -101,6 +111,7 @@ services:
       BEHAVIORAL_ANALYSIS_URL: ${BEHAVIORAL_ANALYSIS_URL:-http://behavioral-analysis:8080}
       ALERT_SERVICE_URL: ${ALERT_SERVICE_URL:-http://alert-service:8000}
       ANALYSIS_FPS: ${ANALYSIS_FPS:-1}
+      ENABLE_UI: ${ENABLE_UI:-true}
       USECASE_1: ${USECASE_1:-SWLP-Service}
       CONTAINER_RESULTS_PATH: /app/results/swlp
     volumes:
@@ -111,6 +122,8 @@ services:
 
   # ---------- Gradio UI Service ----------
   swlp-suscpicious-ui:
+    profiles:
+      - ui
     build:
       context: ui
       dockerfile: Dockerfile
@@ -203,7 +216,8 @@ services:
     image: openvino/model_server:${OVMS_IMAGE_TAG:-2026.1-gpu}
     container_name: ovms-vlm
     volumes:
-      - ${MODEL_PATH:-./models}:/models:ro
+      - ${MODEL_PATH:-./models/vlm_models}:/models:ro
+      - ovms-cache:/cache
     ports:
       - "${OVMS_GRPC_PORT:-8002}:8000"
       - "${OVMS_REST_PORT:-8003}:8001"
@@ -211,14 +225,16 @@ services:
       - storewide-lp
     environment:
       - LOG_LEVEL=INFO
+      - OVMS_CACHE_DIR=/cache
     devices:
       - /dev/dri:/dev/dri
     group_add:
       - ${RENDER_GROUP_ID:-992}
     command: >
-      --config_path /models/vlm_models/config.json
+      --config_path /models/config.json
       --port 8000
       --rest_port 8001
+      --cache_dir /cache
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/v1/config"]
       interval: 15s
@@ -233,3 +249,4 @@ networks:
 
 volumes:
   seaweedfs-data:
+  ovms-cache:
